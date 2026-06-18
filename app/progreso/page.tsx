@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { USER_PROFILE } from "@/lib/constants/profile";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getInBodyScans } from "@/lib/supabase";
 import type { InBodyScan } from "@/types";
 import InBodyUpload from "@/components/progreso/InBodyUpload";
 import ProgressBar from "@/components/progreso/ProgressBar";
@@ -13,29 +13,10 @@ export default function ProgresoPage() {
   const [scans, setScans] = useState<InBodyScan[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadScans = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setScans([]);
-      setLoading(false);
-      return;
-    }
-
-    const supabase = getSupabase();
-    if (!supabase) {
-      setScans([]);
-      setLoading(false);
-      return;
-    }
-
+  const loadScans = useCallback(() => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("inbody_scans")
-      .select("*")
-      .order("fecha_scan", { ascending: false });
-
-    if (!error && data) {
-      setScans(data as InBodyScan[]);
-    }
+    const data = getInBodyScans();
+    setScans(data);
     setLoading(false);
   }, []);
 
@@ -63,10 +44,7 @@ export default function ProgresoPage() {
         <h2 className="mb-3 text-sm font-medium uppercase tracking-widest text-bronze">
           InBody
         </h2>
-        <InBodyUpload
-          onSaved={loadScans}
-          previousScan={previousScan}
-        />
+        <InBodyUpload onSaved={loadScans} previousScan={previousScan} />
       </section>
 
       <section>

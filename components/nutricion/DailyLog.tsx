@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
-import type { Platillo, RegistroComida, SlotComidaId } from "@/types";
-import { SLOT_LABELS } from "@/lib/constants/meals";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getMealsByDate, deleteMealEntry, saveMealEntry } from "@/lib/supabase";
+import type { Platillo } from "@/types";
+import type { SlotComidaId } from "@/types";
 import MacroSummary from "./MacroSummary";
 
 function formatDateISO(date: Date): string {
@@ -25,35 +25,15 @@ type Props = {
 
 export default function DailyLog({ refreshKey = 0 }: Props) {
   const [fecha, setFecha] = useState(() => new Date());
-  const [registros, setRegistros] = useState<RegistroComida[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [registros, setRegistros] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const fechaStr = formatDateISO(fecha);
 
-  const loadRegistros = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setRegistros([]);
-      setLoading(false);
-      return;
-    }
-
-    const supabase = getSupabase();
-    if (!supabase) {
-      setRegistros([]);
-      setLoading(false);
-      return;
-    }
-
+  const loadRegistros = useCallback(() => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("registro_comidas")
-      .select("*")
-      .eq("fecha", fechaStr)
-      .order("created_at", { ascending: true });
-
-    if (!error && data) {
-      setRegistros(data as RegistroComida[]);
-    }
+    const data = getMealsByDate(fechaStr);
+    setRegistros(data);
     setLoading(false);
   }, [fechaStr]);
 
@@ -61,128 +41,77 @@ export default function DailyLog({ refreshKey = 0 }: Props) {
     loadRegistros();
   }, [loadRegistros, refreshKey]);
 
-  const totals = useMemo(
-    () =>
-      registros.reduce(
-        (acc, r) => ({
-          calorias: acc.calorias + (r.calorias ?? 0),
-          proteina: acc.proteina + Number(r.proteina ?? 0),
-          carbohidratos: acc.carbohidratos + Number(r.carbohidratos ?? 0),
-          grasas: acc.grasas + Number(r.grasas ?? 0),
-        }),
-        { calorias: 0, proteina: 0, carbohidratos: 0, grasas: 0 }
-      ),
-    [registros]
+  const handleDelete = (id: string) => {
+    deleteMealEntry(fechaStr, id);
+    loadRegistros();
+  };
+
+  const totales = registros.reduce(
+    (acc, r) => ({
+      calorias: acc.calorias + (r.calorias || 0),
+      proteina: acc.proteina + (r.proteina || 0),
+      carbohidratos: acc.carbohidratos + (r.carbohidratos || 0),
+      grasas: acc.grasas + (r.grasas || 0),
+    }),
+    { calorias: 0, proteina: 0, carbohidratos: 0, grasas: 0 }
   );
 
-  const grouped = useMemo(() => {
-    const slots: SlotComidaId[] = [
-      "desayuno",
-      "mediaManana",
-      "comida",
-      "postEntreno",
-      "cena",
-    ];
-    return slots
-      .map((slot) => ({
-        slot,
-        items: registros.filter((r) => r.slot === slot),
-      }))
-      .filter((g) => g.items.length > 0);
-  }, [registros]);
-
-  async function handleDelete(id: string) {
-    const supabase = getSupabase();
-    if (!supabase) return;
-    const { error } = await supabase.from("registro_comidas").delete().eq("id", id);
-    if (!error) {
-      setRegistros((prev) => prev.filter((r) => r.id !== id));
-    }
-  }
-
-  function shiftDay(delta: number) {
-    setFecha((prev) => {
-      const next = new Date(prev);
-      next.setDate(next.getDate() + delta);
-      return next;
-    });
-  }
+  const cambiarDia = (dias: number) => {
+    const nueva = new Date(fecha);
+    nueva.setDate(nueva.getDate() + dias);
+    setFecha(nueva);
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <button
-          type="button"
-          onClick={() => shiftDay(-1)}
-          className="rounded-lg p-2 text-text-secondary hover:bg-bg-elevated"
-          aria-label="Día anterior"
+          onClick={() => cambiarDia(-1)}
+          className="p-2 rounded-xl bg-bg-elevated text-text-secondary hover:text-text-primary"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={18} />
         </button>
-        <p className="text-sm font-medium capitalize text-text-primary">
+        <span className="text-sm font-medium text-text-primary capitalize">
           {formatDisplayDate(fecha)}
-        </p>
+        </span>
         <button
-          type="button"
-          onClick={() => shiftDay(1)}
-          className="rounded-lg p-2 text-text-secondary hover:bg-bg-elevated"
-          aria-label="Día siguiente"
+          onClick={() => cambiarDia(1)}
+          className="p-2 rounded-xl bg-bg-elevated text-text-secondary hover:text-text-primary"
         >
-          <ChevronRight size={20} />
+          <ChevronRight size={18} />
         </button>
       </div>
 
-      <MacroSummary totals={totals} />
-
-      {!isSupabaseConfigured() && (
-        <p className="rounded-xl border border-bronze-border bg-bronze-subtle p-3 text-xs text-bronze">
-          Configura Supabase en .env.local para guardar tu registro de comidas.
-        </p>
-      )}
+      <MacroSummary totales={totales} />
 
       {loading ? (
-        <p className="text-center text-sm text-text-muted">Cargando...</p>
+        <p className="text-text-muted text-sm text-center py-4">Cargando...</p>
       ) : registros.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-bg-card p-8 text-center">
-          <p className="text-sm text-text-secondary">
-            No hay registros para este día.
-          </p>
-          <p className="mt-1 text-xs text-text-muted">
-            Agrega platillos desde &quot;Mis opciones&quot;
+        <div className="text-center py-8">
+          <p className="text-text-muted text-sm">Nada registrado aún.</p>
+          <p className="text-text-muted text-xs mt-1">
+            Elige tus opciones en la pestaña anterior.
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {grouped.map(({ slot, items }) => (
-            <div key={slot}>
-              <p className="mb-2 text-xs font-medium uppercase tracking-widest text-bronze">
-                {SLOT_LABELS[slot]}
-              </p>
-              <div className="space-y-2">
-                {items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between rounded-xl border border-border bg-bg-card px-4 py-3"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-text-primary">
-                        {item.nombre}
-                      </p>
-                      <p className="text-xs text-text-muted">
-                        {item.calorias ?? 0} kcal
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(item.id)}
-                      className="rounded-lg p-2 text-text-muted hover:bg-bg-elevated hover:text-red-400"
-                      aria-label="Eliminar"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
+        <div className="space-y-2">
+          {registros.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center justify-between bg-bg-card border border-border rounded-xl px-4 py-3"
+            >
+              <div>
+                <p className="text-text-primary text-sm font-medium">{r.nombre}</p>
+                <p className="text-text-muted text-xs mt-0.5">
+                  {r.calorias} kcal · {r.proteina}g P · {r.carbohidratos}g C · {r.grasas}g G
+                </p>
               </div>
+              <button
+                onClick={() => handleDelete(r.id)}
+                className="text-text-muted hover:text-red-400 p-1"
+              >
+                <Trash2 size={15} />
+              </button>
             </div>
           ))}
         </div>
@@ -191,15 +120,10 @@ export default function DailyLog({ refreshKey = 0 }: Props) {
   );
 }
 
-export async function addPlatilloToLog(platillo: Platillo, slot: SlotComidaId) {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return { success: false, error: "Supabase no configurado" };
-  }
-
-  const fecha = formatDateISO(new Date());
-  const { error } = await supabase.from("registro_comidas").insert({
-    fecha,
+export function addPlatilloToLog(platillo: Platillo, slot: SlotComidaId) {
+  const today = formatDateISO(new Date());
+  const result = saveMealEntry({
+    fecha: today,
     slot,
     nombre: platillo.nombre,
     calorias: platillo.calorias,
@@ -207,6 +131,5 @@ export async function addPlatilloToLog(platillo: Platillo, slot: SlotComidaId) {
     carbohidratos: platillo.carbohidratos,
     grasas: platillo.grasas,
   });
-
-  return { success: !error, error: error?.message };
+  return { success: true, data: result };
 }
